@@ -6,6 +6,7 @@ from shared.db import engine, Base
 
 from services.user_management.models.super_admin import SuperAdmin
 from services.user_management.models.schools import School
+from services.user_management.models.users import SchoolUser
 
 async def init_models():
     async with engine.begin() as conn:

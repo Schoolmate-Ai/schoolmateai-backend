@@ -1,7 +1,7 @@
 # services/user_management/models/schools.py
-
 from sqlalchemy import Column, String, DateTime, UniqueConstraint
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from shared.db import Base  
 
 class School(Base):
@@ -14,6 +14,9 @@ class School(Base):
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship to users
+    users = relationship("SchoolUser", back_populates="school", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint('name', 'address', name='uq_school_name_address'),
