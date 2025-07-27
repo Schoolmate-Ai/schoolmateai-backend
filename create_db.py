@@ -5,6 +5,7 @@ from shared.db import engine, Base
 # Import all models here so they are registered with SQLAlchemy's metadata
 
 from services.user_management.models.super_admin import SuperAdmin
+from services.user_management.models.schools import School
 
 async def init_models():
     async with engine.begin() as conn:
