@@ -24,6 +24,7 @@ class SchoolUser(Base):
     hashed_password = Column(String, nullable=False)
     role = Column(Enum(SchoolUserRole), nullable=False)
     school_id = Column(String, ForeignKey('schools.id'), nullable=False)  # Changed to match School.id type
+    class_id = Column(UUID(as_uuid=True), ForeignKey("school_classes.id"), nullable=True)
     profile_data = Column(JSONB, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -32,8 +33,13 @@ class SchoolUser(Base):
     # Relationship to school
     school = relationship("School", back_populates="users")
 
+    # Relationship to class
+    student_class = relationship("SchoolClass", back_populates="students")
+    
+
     __table_args__ = (
-        Index('idx_school_user_email', 'email'),
-        Index('idx_school_user_role', 'role'),
-        Index('idx_school_user_school', 'school_id'),
+    Index('idx_user_email', 'email'),  # login and unique checks
+    Index('idx_user_school', 'school_id'),  # school-level access
+    Index('idx_user_school_role', 'school_id', 'role'),  # efficient role-wise listing
+    Index('idx_user_class_role', 'class_id', 'role'),  # for student/teacher filtering within class
     )

@@ -18,6 +18,10 @@ class School(Base):
     # Relationship to users
     users = relationship("SchoolUser", back_populates="school", cascade="all, delete-orphan")
 
+    # Relationship to classes
+    classes = relationship("SchoolClass", back_populates="school", cascade="all, delete-orphan")
+
+
     __table_args__ = (
         UniqueConstraint('name', 'address', name='uq_school_name_address'),
     )
