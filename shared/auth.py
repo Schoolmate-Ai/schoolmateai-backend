@@ -56,3 +56,28 @@ def get_current_super_admin_user(token: str = Depends(oauth2_scheme)):
         )
     
     return {"email": email, "role": role}
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    user_id: str = payload.get("user_id")
+    email: str = payload.get("sub")
+    role: str = payload.get("role")
+
+    if not user_id or not email or not role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token is missing required fields"
+        )
+
+    return {
+        "user_id": user_id,
+        "email": email,
+        "role": role
+    }

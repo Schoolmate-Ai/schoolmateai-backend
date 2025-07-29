@@ -22,6 +22,11 @@ from services.user_management.schemas.schools import (
 from shared.db import get_db
 from shared.auth import verify_password, create_access_token, get_current_super_admin_user
 
+from services.user_management.models.users import SchoolUser, SchoolUserRole
+from services.user_management.schemas.users import SchoolUserCreate, SchoolUserOut
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
+
 router = APIRouter(prefix="/superadmins", tags=["SuperAdmin"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -112,3 +117,67 @@ async def register_school(
     await db.refresh(new_school)
     
     return new_school
+
+# --- GET ALL SCHOOLS (SuperAdmin only) ---
+@router.get("/schools", response_model=list[SchoolOut])
+async def get_all_schools(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_super_admin_user)
+):
+    result = await db.execute(select(School))
+    schools = result.scalars().all()
+    return schools
+
+
+# --- REGISTER SCHOOL SUPERADMIN (SuperAdmin only) ---
+@router.post("/register-school-superadmin", response_model=SchoolUserOut)
+async def register_school_superadmin(
+    user_data: SchoolUserCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_super_admin_user)
+):
+    # Validate role
+    if user_data.role != SchoolUserRole.SCHOOL_SUPERADMIN:
+        raise HTTPException(
+            status_code=400,
+            detail="Only 'school_superadmin' role is allowed in this route"
+        )
+
+    # Check if school exists
+    result = await db.execute(select(School).where(School.id == user_data.school_id))
+    school = result.scalars().first()
+    if not school:
+        raise HTTPException(
+            status_code=404,
+            detail="School with given ID does not exist"
+        )
+    
+    # Check if email already exists
+    result = await db.execute(select(SchoolUser).where(SchoolUser.email == user_data.email))
+    existing_user = result.scalars().first()
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="User with this email already exists"
+        )
+
+    hashed_pw = pwd_context.hash(user_data.password)
+
+    new_user = SchoolUser(
+        name=user_data.name,
+        email=user_data.email,
+        hashed_password=hashed_pw,
+        role=user_data.role,
+        school_id=user_data.school_id,
+        profile_data=user_data.profile_data
+    )
+
+    db.add(new_user)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to create user due to integrity constraints")
+    
+    await db.refresh(new_user)
+    return new_user
