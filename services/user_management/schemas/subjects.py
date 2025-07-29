@@ -45,3 +45,20 @@ class StudentSubjectOut(BaseModel):
 class SubjectMappingInput(BaseModel):
     subject_id: UUID
     is_optional: bool = False
+
+class ClassSubjectDetailOut(BaseModel):
+    id: UUID
+    subject_id: UUID
+    subject_name: str
+    is_optional: bool
+
+    class Config:
+        orm_mode = True
+
+class StudentSubjectDetailOut(BaseModel):
+    subject_id: UUID
+    subject_name: str
+    is_optional: bool
+
+    class Config:
+        orm_mode = True
