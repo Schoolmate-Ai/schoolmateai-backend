@@ -41,3 +41,7 @@ class StudentSubjectOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+class SubjectMappingInput(BaseModel):
+    subject_id: UUID
+    is_optional: bool = False

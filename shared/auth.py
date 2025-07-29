@@ -69,6 +69,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     user_id: str = payload.get("user_id")
     email: str = payload.get("sub")
     role: str = payload.get("role")
+    school_id: str = payload.get("school_id")
 
     if not user_id or not email or not role:
         raise HTTPException(
@@ -79,5 +80,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     return {
         "user_id": user_id,
         "email": email,
-        "role": role
+        "role": role,
+        "school_id": school_id
     }

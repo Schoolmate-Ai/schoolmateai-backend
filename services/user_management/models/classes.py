@@ -20,3 +20,4 @@ class SchoolClass(Base):
 
     school = relationship("School", back_populates="classes")
     students = relationship("SchoolUser", back_populates="student_class", cascade="all, delete-orphan")
+    class_subjects = relationship("ClassSubject", back_populates="school_class", cascade="all, delete-orphan")

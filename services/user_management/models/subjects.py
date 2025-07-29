@@ -18,7 +18,7 @@ class SchoolSubject(Base):
         UniqueConstraint("school_id", "name", name="uq_school_subject_name"),
     )
 
-    school = relationship("School", backref="subjects")
+    school = relationship("School", back_populates="subjects")
 
 
 # Subject mapped to a class (can be optional or compulsory)
@@ -34,7 +34,7 @@ class ClassSubject(Base):
         UniqueConstraint("class_id", "subject_id", name="uq_class_subject"),
     )
 
-    school_class = relationship("SchoolClass", backref="class_subjects")
+    school_class = relationship("SchoolClass", back_populates="class_subjects")
     subject = relationship("SchoolSubject")
 
 
@@ -50,5 +50,7 @@ class StudentSubject(Base):
         UniqueConstraint("student_id", "class_subject_id", name="uq_student_optional_subject"),
     )
 
-    student = relationship("SchoolUser", backref="optional_subjects")
+    student = relationship("SchoolUser", back_populates="optional_subjects")
     class_subject = relationship("ClassSubject")
+
+

@@ -22,7 +22,8 @@ class School(Base):
     classes = relationship("SchoolClass", back_populates="school", cascade="all, delete-orphan")
 
     # Relationship to subjects
-    subjects = relationship("Subject", back_populates="school", cascade="all, delete")
+    subjects = relationship("SchoolSubject", back_populates="school", cascade="all, delete-orphan")
+
 
 
     __table_args__ = (
