@@ -1,3 +1,4 @@
+# services/user_management/models/classes.py
 from sqlalchemy import Column, String, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -21,3 +22,5 @@ class SchoolClass(Base):
     school = relationship("School", back_populates="classes")
     students = relationship("SchoolUser", back_populates="student_class", cascade="all, delete-orphan")
     class_subjects = relationship("ClassSubject", back_populates="school_class", cascade="all, delete-orphan")
+    class_teacher = relationship("ClassTeacher", back_populates="class_", uselist=False, cascade="all, delete-orphan")
+
