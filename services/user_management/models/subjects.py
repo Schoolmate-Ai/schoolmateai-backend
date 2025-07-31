@@ -27,6 +27,7 @@ class ClassSubject(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     class_id = Column(UUID(as_uuid=True), ForeignKey("school_classes.id"), nullable=False)
+    teacher_id = Column(UUID(as_uuid=True), ForeignKey("school_users.id"), nullable=True)  
     subject_id = Column(UUID(as_uuid=True), ForeignKey("school_subjects.id"), nullable=False)
     is_optional = Column(Boolean, default=False)
 

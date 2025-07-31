@@ -19,12 +19,14 @@ class SchoolSubjectOut(BaseModel):
 class ClassSubjectCreate(BaseModel):
     class_id: UUID
     subject_id: UUID
+    teacher_id: Optional[UUID] = None
     is_optional: bool = False
 
 class ClassSubjectOut(BaseModel):
     id: UUID
     class_id: UUID
     subject_id: UUID
+    teacher_id: Optional[UUID] = None
     is_optional: bool
 
     class Config:
@@ -51,6 +53,8 @@ class ClassSubjectDetailOut(BaseModel):
     subject_id: UUID
     subject_name: str
     is_optional: bool
+    teacher_id: Optional[UUID] = None
+    teacher_name: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -62,3 +66,8 @@ class StudentSubjectDetailOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class AssignTeacherToSubject(BaseModel):
+    teacher_id: UUID
+    class_subject_id: UUID

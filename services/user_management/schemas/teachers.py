@@ -47,3 +47,24 @@ class TeacherSubjectDetailedOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class ClassWithTeacherResponse(BaseModel):
+    class_id: UUID4
+    class_name: str
+    section: Optional[str] = None
+    teacher_id: Optional[UUID4] = None
+    teacher_name: Optional[str] = "No teacher assigned"
+
+    class Config:
+        orm_mode = True
+
+class TeacherSubjectAssignmentOut(BaseModel):
+    class_id: UUID4
+    class_display_name: str
+    subject_id: UUID4
+    subject_name: str
+    is_optional: bool
+
+    class Config:
+        orm_mode = True

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
-from typing import List, Dict
+from typing import List, Dict, Any
 from sqlalchemy import case, and_, or_
 from uuid import UUID
 
@@ -18,7 +18,8 @@ from services.user_management.schemas.subjects import (
     StudentSubjectOut,
     StudentSubjectCreate,
     ClassSubjectDetailOut,
-    StudentSubjectDetailOut
+    StudentSubjectDetailOut,
+    AssignTeacherToSubject
 )
 
 router = APIRouter(prefix="/subjects", tags=["Subjects"])
@@ -81,6 +82,7 @@ async def add_subject_to_class(
     class_subject = ClassSubject(
         class_id=payload.class_id,
         subject_id=payload.subject_id,
+        teacher_id=payload.teacher_id,
         is_optional=payload.is_optional
     )
 
@@ -194,18 +196,76 @@ async def get_subjects_for_class(
 
     # Get all subject mappings for the class with subject names
     result = await db.execute(
-        select(
-            ClassSubject.id,
-            ClassSubject.subject_id,
-            SchoolSubject.name.label("subject_name"),
-            ClassSubject.is_optional
-        )
-        .join(SchoolSubject, ClassSubject.subject_id == SchoolSubject.id)
-        .where(ClassSubject.class_id == class_id)
+    select(
+        ClassSubject.id,
+        ClassSubject.subject_id,
+        SchoolSubject.name.label("subject_name"),
+        ClassSubject.is_optional,
+        ClassSubject.teacher_id,
+        SchoolUser.name.label("teacher_name")  
     )
+    .join(SchoolSubject, ClassSubject.subject_id == SchoolSubject.id)
+    .outerjoin(SchoolUser, ClassSubject.teacher_id == SchoolUser.id)  # Add this
+    .where(ClassSubject.class_id == class_id)
+)
     
     class_subjects = result.all()
     return class_subjects
+
+
+# --- GET ALL CLASSES WITH SUBJECTS FOR SCHOOL ---
+@router.get("/all-classes-with-subjects", response_model=Dict[str, List[Dict[str, Any]]])
+async def get_classes_with_subjects(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    # Authorization check
+    if current_user["role"] not in [
+        SchoolUserRole.SCHOOL_ADMIN,
+        SchoolUserRole.SCHOOL_SUPERADMIN,
+        SchoolUserRole.TEACHER
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view school subjects"
+        )
+
+    # Get all classes with their subjects
+    result = await db.execute(
+        select(
+            SchoolClass.id.label("class_id"),
+            SchoolClass.class_name,
+            SchoolClass.section,
+            ClassSubject.subject_id,
+            SchoolSubject.name.label("subject_name"),
+            ClassSubject.is_optional,
+            ClassSubject.teacher_id,
+            SchoolUser.name.label("teacher_name")
+        )
+        .join(ClassSubject, SchoolClass.id == ClassSubject.class_id)
+        .join(SchoolSubject, ClassSubject.subject_id == SchoolSubject.id)
+        .outerjoin(SchoolUser, ClassSubject.teacher_id == SchoolUser.id)
+        .where(SchoolClass.school_id == current_user["school_id"])
+        .order_by(SchoolClass.class_name, SchoolClass.section, SchoolSubject.name)
+    )
+
+    # Organize results by class
+    classes_with_subjects = {}
+    for row in result.all():
+        class_key = f"{row.class_name} {row.section}"
+        subject_info = {
+            "subject_id": row.subject_id,
+            "subject_name": row.subject_name,
+            "is_optional": row.is_optional,
+            "teacher_id": row.teacher_id,
+            "teacher_name": row.teacher_name
+        }
+        
+        if class_key not in classes_with_subjects:
+            classes_with_subjects[class_key] = []
+        classes_with_subjects[class_key].append(subject_info)
+    
+    return classes_with_subjects
 
 
 # --- REMOVE SUBJECT FROM CLASS ---
@@ -417,6 +477,7 @@ async def remove_optional_subject(
             detail="Error removing optional subject"
         )
     
+
 # --- GET ALL(OPT + COMP.) SUBJECT OF A STUDENT ---
 @router.get("/student/{student_id}/all-subjects", response_model=Dict[str, List[StudentSubjectDetailOut]])
 async def get_all_student_subjects(
@@ -565,3 +626,65 @@ async def bulk_assign_optional_subject(
         "failed": failed,
         "message": f"Assigned to {len(success_ids)} students"
     }
+
+
+# --- ASSIGN TEACHERS TO SUBJECTS ---
+@router.post("/assign-teacher-to-subject", response_model=ClassSubjectOut)
+async def assign_teacher_to_subject(
+    payload: AssignTeacherToSubject,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    # Authorization check
+    if current_user["role"] not in [
+        SchoolUserRole.SCHOOL_ADMIN,
+        SchoolUserRole.SCHOOL_SUPERADMIN
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can assign teachers to subjects"
+        )
+
+    # Verify the teacher exists and is a teacher in the same school
+    teacher = await db.execute(
+        select(SchoolUser).where(
+            SchoolUser.id == payload.teacher_id,
+            SchoolUser.school_id == current_user["school_id"],
+            SchoolUser.role == SchoolUserRole.TEACHER
+        ))
+    teacher = teacher.scalars().first()
+    if not teacher:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Teacher not found in your school"
+        )
+
+    # Verify the class-subject mapping exists
+    class_subject = await db.execute(
+        select(ClassSubject)
+        .join(SchoolClass, ClassSubject.class_id == SchoolClass.id)
+        .where(
+            ClassSubject.id == payload.class_subject_id,
+            SchoolClass.school_id == current_user["school_id"]
+        ))
+    class_subject = class_subject.scalars().first()
+    
+    if not class_subject:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Class-subject mapping not found"
+        )
+
+    # Assign the teacher
+    class_subject.teacher_id = payload.teacher_id
+    
+    try:
+        await db.commit()
+        await db.refresh(class_subject)
+        return class_subject
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Error assigning teacher to subject"
+        )

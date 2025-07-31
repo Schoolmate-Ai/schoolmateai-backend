@@ -8,7 +8,8 @@ from services.user_management.schemas.users import (
     SchoolUserCreate,
     SchoolUserOut,
     StudentOut,
-    ClassStudentRequest
+    ClassStudentRequest,
+    SchoolTeacherOut
 )
 from shared.auth import verify_password, create_access_token
 from shared.db import get_db
@@ -514,3 +515,40 @@ async def get_all_students_with_classes(
     students = result.scalars().all()
     
     return students
+
+
+# --- GET ALL TEACHERS FOR A SCHOOL (ID, NAME, EMAIL) ---
+@router.get("/{school_id}/teachers", response_model=List[SchoolTeacherOut])
+async def get_all_teachers(
+    school_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    # Verify the user has access to this school's data
+    if current_user["school_id"] != school_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access data from your own school"
+        )
+
+    # Only school admins, superadmins and teachers can access this endpoint
+    if current_user["role"] not in [
+        SchoolUserRole.SCHOOL_ADMIN, 
+        SchoolUserRole.SCHOOL_SUPERADMIN,
+        SchoolUserRole.TEACHER
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient privileges to view teachers"
+        )
+
+    # Get all teachers of the school with only id, name, email
+    result = await db.execute(
+        select(SchoolUser).where(
+            SchoolUser.school_id == school_id,
+            SchoolUser.role == SchoolUserRole.TEACHER
+        ).order_by(SchoolUser.name)
+    )
+    teachers = result.scalars().all()
+    
+    return teachers

@@ -4,6 +4,7 @@ from starlette.middleware.cors import CORSMiddleware
 from services.user_management.controllers.super_admin_service import router as superadmin_router
 from services.user_management.controllers.school_service import router as school_router
 from services.user_management.controllers.subject_service import router as subject_router
+from services.user_management.controllers.teacher_service import router as teacher_router
 
 
 app = FastAPI(title="SchoolMate AI Backend")
@@ -24,3 +25,5 @@ def health_check():
 app.include_router(superadmin_router)
 app.include_router(school_router)
 app.include_router(subject_router)
+app.include_router(teacher_router)
+
