@@ -61,7 +61,8 @@ async def assign_class_teacher(
 ):
     """
     Assign or update a class teacher assignment.
-    Automatically handles both new assignments and updates.
+    - Atomically updates profile_data for both new and previous teachers
+    - Handles both new assignments and updates
     """
     # Admin authorization
     if current_user["role"] not in [SchoolUserRole.SCHOOL_ADMIN, SchoolUserRole.SCHOOL_SUPERADMIN]:
@@ -98,17 +99,51 @@ async def assign_class_teacher(
     )
     current_assignment = current_assignment.scalar_one_or_none()
 
-    if current_assignment:
-        # Update existing assignment
-        current_assignment.teacher_id = data.teacher_id
-    else:
-        # Create new assignment
-        current_assignment = ClassTeacher(**data.dict())
-        db.add(current_assignment)
+    from sqlalchemy import text
 
-    await db.commit()
-    await db.refresh(current_assignment)
+    # Start transaction
+    async with db.begin():
+        # If replacing an existing teacher, mark them as not a class teacher
+        if current_assignment and current_assignment.teacher_id != data.teacher_id:
+            await db.execute(
+                text("""
+                UPDATE school_users 
+                SET profile_data = jsonb_set(
+                    COALESCE(profile_data, '{}'::jsonb),
+                    '{isClassteacher}',
+                    'false'::jsonb,
+                    true
+                )
+                WHERE id = :old_teacher_id
+                """).bindparams(old_teacher_id=current_assignment.teacher_id)
+            )
+
+        # Mark new teacher as class teacher
+        await db.execute(
+            text("""
+            UPDATE school_users 
+            SET profile_data = jsonb_set(
+                COALESCE(profile_data, '{}'::jsonb),
+                '{isClassteacher}',
+                'true'::jsonb,
+                true
+            )
+            WHERE id = :teacher_id
+            """).bindparams(teacher_id=data.teacher_id)
+        )
+
+        # Update or create assignment
+        if current_assignment:
+            current_assignment.teacher_id = data.teacher_id
+        else:
+            current_assignment = ClassTeacher(**data.dict())
+            db.add(current_assignment)
+
+        await db.commit()
+        await db.refresh(current_assignment)
+    
     return current_assignment
+
 
 # --- REMOVE CLASS TEACHER ASSIGNMENT ---
 @router.delete("/remove-assignment/{class_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -118,7 +153,9 @@ async def remove_class_teacher(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Remove teacher assignment from a class.
+    Remove teacher assignment from a class and update their profile_data.
+    - Removes the class teacher assignment
+    - Sets isClassteacher=false for the affected teacher
     """
     # Admin authorization
     if current_user["role"] not in [SchoolUserRole.SCHOOL_ADMIN, SchoolUserRole.SCHOOL_SUPERADMIN]:
@@ -129,7 +166,7 @@ async def remove_class_teacher(
     if not school_class or school_class.school_id != current_user["school_id"]:
         raise HTTPException(status_code=404, detail="Class not found or unauthorized")
 
-    # Find and delete assignment
+    # Find assignment
     assignment = await db.execute(
         select(ClassTeacher)
         .where(ClassTeacher.class_id == class_id)
@@ -137,10 +174,31 @@ async def remove_class_teacher(
     assignment = assignment.scalar_one_or_none()
 
     if assignment:
-        await db.delete(assignment)
-        await db.commit()
+        from sqlalchemy import text
+        
+        # Start transaction
+        async with db.begin():
+            # Update teacher's status first
+            await db.execute(
+                text("""
+                UPDATE school_users 
+                SET profile_data = jsonb_set(
+                    COALESCE(profile_data, '{}'::jsonb),
+                    '{isClassteacher}',
+                    'false'::jsonb,
+                    true
+                )
+                WHERE id = :teacher_id
+                """).bindparams(teacher_id=assignment.teacher_id)
+            )
+            
+            # Then delete the assignment
+            await db.delete(assignment)
+            
+            await db.commit()
 
     return None  # 204 No Content
+
 
 # --- GET TEACHER'S CLASS ASSIGNMENT ---
 @router.get("/teacher-class/{teacher_id}", response_model=Optional[ClassTeacherOut])
