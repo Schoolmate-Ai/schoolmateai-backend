@@ -9,11 +9,10 @@ import uuid
 from datetime import datetime
 
 class AttendanceStatus(str, enum.Enum):
-    PRESENT = "present"
-    ABSENT = "absent"
-    LATE = "late"
-    EXCUSED = "excused"
-    HALF_DAY = "half_day"
+    PRESENT = "P"
+    ABSENT = "A"
+    HALF_DAY = "HD"
+    LEAVE = "L"
 
 class Attendance(Base):
     __tablename__ = "attendances"

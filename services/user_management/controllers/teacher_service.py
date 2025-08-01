@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy import text
 
-from services.user_management.models.teachers import ClassTeacher
 from services.user_management.models.users import SchoolUser, SchoolUserRole
 from services.user_management.models.subjects import SchoolSubject, ClassSubject
 from services.user_management.models.classes import SchoolClass
@@ -27,30 +27,26 @@ async def get_classes_with_teachers(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get all classes with their teacher assignments (if any).
-    Efficient single query with LEFT JOIN.
+    Get all classes with their assigned teacher (if any).
+    Uses direct reference from class_teacher_id in SchoolClass.
     """
     result = await db.execute(
-        select(
-            SchoolClass,
-            SchoolUser.id.label("teacher_id"),
-            SchoolUser.name.label("teacher_name")
-        )
-        .select_from(SchoolClass)
-        .outerjoin(ClassTeacher, SchoolClass.id == ClassTeacher.class_id)
-        .outerjoin(SchoolUser, ClassTeacher.teacher_id == SchoolUser.id)
+        select(SchoolClass, SchoolUser)
+        .outerjoin(SchoolUser, SchoolUser.id == SchoolClass.class_teacher_id)
         .where(SchoolClass.school_id == current_user["school_id"])
         .order_by(SchoolClass.class_name)
     )
-    
-    return [{
-        "class_id": class_.id,
-        "class_name": class_.class_name,
-        "teacher_id": teacher_id,
-        "section": class_.section,  
-        "teacher_name": teacher_name or "No teacher assigned"
-    } for class_, teacher_id, teacher_name in result.all()]
 
+    return [
+        {
+            "class_id": school_class.id,
+            "class_name": school_class.class_name,
+            "section": school_class.section,
+            "teacher_id": teacher.id if teacher else None,
+            "teacher_name": teacher.name if teacher else "No teacher assigned"
+        }
+        for school_class, teacher in result.all()
+    ]
 
 # --- UPSERT CLASS TEACHER ASSIGNMENT ---
 @router.post("/assign-class-teacher", response_model=ClassTeacherOut)
@@ -60,127 +56,101 @@ async def assign_class_teacher(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Assign or update a class teacher assignment.
-    - Atomically updates profile_data for both new and previous teachers
-    - Handles both new assignments and updates
+    Assign or update a class teacher to a class (in-place, no separate table).
     """
-    # Admin authorization
     if current_user["role"] not in [SchoolUserRole.SCHOOL_ADMIN, SchoolUserRole.SCHOOL_SUPERADMIN]:
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # Verify teacher exists and belongs to school
     teacher = await db.get(SchoolUser, data.teacher_id)
     if not teacher or teacher.role != SchoolUserRole.TEACHER or teacher.school_id != current_user["school_id"]:
         raise HTTPException(status_code=404, detail="Teacher not found or unauthorized")
 
-    # Verify class exists and belongs to school
     school_class = await db.get(SchoolClass, data.class_id)
     if not school_class or school_class.school_id != current_user["school_id"]:
         raise HTTPException(status_code=404, detail="Class not found or unauthorized")
 
-    # Check if teacher is already assigned elsewhere
-    existing_assignment = await db.execute(
-        select(ClassTeacher)
-        .where(
-            ClassTeacher.teacher_id == data.teacher_id,
-            ClassTeacher.class_id != data.class_id
+    conflict_query = await db.execute(
+        select(SchoolClass).where(
+            SchoolClass.class_teacher_id == data.teacher_id,
+            SchoolClass.id != data.class_id
         )
     )
-    if existing_assignment.scalar_one_or_none():
+    if conflict_query.scalar_one_or_none():
         raise HTTPException(
             status_code=400,
             detail="This teacher is already assigned to another class"
         )
 
-    # Find existing assignment for this class
-    current_assignment = await db.execute(
-        select(ClassTeacher)
-        .where(ClassTeacher.class_id == data.class_id)
-    )
-    current_assignment = current_assignment.scalar_one_or_none()
-
-    from sqlalchemy import text
-
-    # Start transaction
-    async with db.begin():
-        # If replacing an existing teacher, mark them as not a class teacher
-        if current_assignment and current_assignment.teacher_id != data.teacher_id:
+    # ✅ Perform DB operations directly (NO nested transaction block)
+    try:
+        if school_class.class_teacher_id and school_class.class_teacher_id != data.teacher_id:
             await db.execute(
                 text("""
+                    UPDATE school_users 
+                    SET profile_data = jsonb_set(
+                        COALESCE(profile_data, '{}'::jsonb),
+                        '{isClassteacher}',
+                        'false'::jsonb,
+                        true
+                    )
+                    WHERE id = :old_teacher_id
+                """).bindparams(old_teacher_id=school_class.class_teacher_id)
+            )
+
+        await db.execute(
+            text("""
                 UPDATE school_users 
                 SET profile_data = jsonb_set(
                     COALESCE(profile_data, '{}'::jsonb),
                     '{isClassteacher}',
-                    'false'::jsonb,
+                    'true'::jsonb,
                     true
                 )
-                WHERE id = :old_teacher_id
-                """).bindparams(old_teacher_id=current_assignment.teacher_id)
-            )
-
-        # Mark new teacher as class teacher
-        await db.execute(
-            text("""
-            UPDATE school_users 
-            SET profile_data = jsonb_set(
-                COALESCE(profile_data, '{}'::jsonb),
-                '{isClassteacher}',
-                'true'::jsonb,
-                true
-            )
-            WHERE id = :teacher_id
+                WHERE id = :teacher_id
             """).bindparams(teacher_id=data.teacher_id)
         )
 
-        # Update or create assignment
-        if current_assignment:
-            current_assignment.teacher_id = data.teacher_id
-        else:
-            current_assignment = ClassTeacher(**data.dict())
-            db.add(current_assignment)
+        school_class.class_teacher_id = data.teacher_id
+        db.add(school_class)
 
         await db.commit()
-        await db.refresh(current_assignment)
-    
-    return current_assignment
+        await db.refresh(school_class)
+
+        return ClassTeacherOut(
+            class_id=school_class.id,
+            teacher_id=data.teacher_id
+        )
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error assigning class teacher: {str(e)}")
 
 
 # --- REMOVE CLASS TEACHER ASSIGNMENT ---
-@router.delete("/remove-assignment/{class_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_class_teacher(
+@router.delete("/unassign-class-teacher/{class_id}")
+async def unassign_class_teacher(
     class_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Remove teacher assignment from a class and update their profile_data.
-    - Removes the class teacher assignment
-    - Sets isClassteacher=false for the affected teacher
+    Unassign the class teacher from a given class (sets class_teacher_id to null).
     """
-    # Admin authorization
     if current_user["role"] not in [SchoolUserRole.SCHOOL_ADMIN, SchoolUserRole.SCHOOL_SUPERADMIN]:
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # Verify class exists
+    # Fetch the class
     school_class = await db.get(SchoolClass, class_id)
     if not school_class or school_class.school_id != current_user["school_id"]:
         raise HTTPException(status_code=404, detail="Class not found or unauthorized")
 
-    # Find assignment
-    assignment = await db.execute(
-        select(ClassTeacher)
-        .where(ClassTeacher.class_id == class_id)
-    )
-    assignment = assignment.scalar_one_or_none()
+    if not school_class.class_teacher_id:
+        raise HTTPException(status_code=400, detail="No class teacher assigned to this class")
 
-    if assignment:
-        from sqlalchemy import text
-        
-        # Start transaction
-        async with db.begin():
-            # Update teacher's status first
-            await db.execute(
-                text("""
+    try:
+        # Set isClassteacher = false in teacher's profile_data
+        await db.execute(
+            text("""
                 UPDATE school_users 
                 SET profile_data = jsonb_set(
                     COALESCE(profile_data, '{}'::jsonb),
@@ -189,39 +159,21 @@ async def remove_class_teacher(
                     true
                 )
                 WHERE id = :teacher_id
-                """).bindparams(teacher_id=assignment.teacher_id)
-            )
-            
-            # Then delete the assignment
-            await db.delete(assignment)
-            
-            await db.commit()
+            """).bindparams(teacher_id=school_class.class_teacher_id)
+        )
 
-    return None  # 204 No Content
+        # Set class_teacher_id to NULL
+        school_class.class_teacher_id = None
+        db.add(school_class)
 
+        await db.commit()
 
-# --- GET TEACHER'S CLASS ASSIGNMENT ---
-@router.get("/teacher-class/{teacher_id}", response_model=Optional[ClassTeacherOut])
-async def get_teacher_assignment(
-    teacher_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Get the class assignment for a specific teacher.
-    """
-    # Verify teacher exists and belongs to school
-    teacher = await db.get(SchoolUser, teacher_id)
-    if not teacher or teacher.school_id != current_user["school_id"]:
-        raise HTTPException(status_code=404, detail="Teacher not found or unauthorized")
+        return {"message": "Class teacher removed"}
+    
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error unassigning class teacher: {str(e)}")
 
-    # Get assignment
-    assignment = await db.execute(
-        select(ClassTeacher)
-        .where(ClassTeacher.teacher_id == teacher_id)
-        .options(selectinload(ClassTeacher.school_class))
-    )
-    return assignment.scalar_one_or_none()
 
 
 # --- GET TEACHER'S SUBJECTS AND CLASSES ---

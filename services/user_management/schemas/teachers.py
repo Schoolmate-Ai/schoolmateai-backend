@@ -13,7 +13,6 @@ class ClassTeacherCreate(BaseModel):
 
 # Response schema
 class ClassTeacherOut(BaseModel):
-    id: UUID4
     teacher_id: UUID4
     class_id: UUID4
 

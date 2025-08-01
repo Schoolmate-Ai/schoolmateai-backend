@@ -12,6 +12,8 @@ class SchoolClass(Base):
     school_id = Column(String, ForeignKey("schools.id"), nullable=False)
     class_name = Column(String, nullable=False)   # E.g., "1st", "2nd", "Nursery"
     section = Column(String, nullable=False)      # E.g., "A", "B"
+    class_teacher_id = Column(UUID(as_uuid=True), ForeignKey("school_users.id"), nullable=True)
+
 
     __table_args__ = (
         UniqueConstraint("school_id", "class_name", "section", name="uq_school_class_section"),
@@ -20,7 +22,7 @@ class SchoolClass(Base):
     )
 
     school = relationship("School", back_populates="classes")
-    students = relationship("SchoolUser", back_populates="student_class", cascade="all, delete-orphan")
+    students = relationship("SchoolUser", back_populates="student_class", cascade="all, delete-orphan", foreign_keys="[SchoolUser.class_id]")
     class_subjects = relationship("ClassSubject", back_populates="school_class", cascade="all, delete-orphan")
-    class_teacher = relationship("ClassTeacher", back_populates="class_", uselist=False, cascade="all, delete-orphan")
+    class_teacher = relationship("SchoolUser", foreign_keys=[class_teacher_id])
 
