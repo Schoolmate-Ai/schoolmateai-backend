@@ -58,6 +58,7 @@ async def school_user_login(
 
         return SchoolUserLoginResponse(
             name=user.name,
+            role=user.role,
             profile_data=user.profile_data,
             access_token=access_token
         )
