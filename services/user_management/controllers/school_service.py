@@ -23,7 +23,7 @@ from typing import List
 from uuid import UUID
 from services.user_management.models.subjects import SchoolSubject
 from services.user_management.schemas.subjects import SchoolSubjectCreate, SchoolSubjectOut
-
+from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/school", tags=["SchoolUser"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -36,7 +36,9 @@ async def school_user_login(
 ):
     try:
         result = await db.execute(
-            select(SchoolUser).where(SchoolUser.email == payload.email)
+            select(SchoolUser)
+            .options(selectinload(SchoolUser.school))
+            .where(SchoolUser.email == payload.email)
         )
         user = result.scalars().first()
 
@@ -60,6 +62,7 @@ async def school_user_login(
             name=user.name,
             role=user.role,
             profile_data=user.profile_data,
+            school_name=user.school.name,
             access_token=access_token
         )
 
