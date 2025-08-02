@@ -34,14 +34,11 @@ class SchoolUser(Base):
     school = relationship("School", back_populates="users")
 
     # Relationship to class
-    student_class = relationship("SchoolClass", back_populates="students")
+    student_class = relationship("SchoolClass", back_populates="students", foreign_keys=[class_id])
     
     # Relationship to option subjects for students
     optional_subjects = relationship("StudentSubject", back_populates="student",cascade="all, delete-orphan")
 
-    # Relationship to classteacher and subject for teachers
-    class_teacher_of = relationship("ClassTeacher", back_populates="teacher", uselist=False)
-    subjects_taught = relationship("TeacherSubject", back_populates="teacher", cascade="all, delete-orphan")
 
 
     __table_args__ = (

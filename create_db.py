@@ -11,6 +11,7 @@ from shared.db import engine, Base
 # from services.user_management.models.subjects import StudentSubject, ClassSubject, SchoolSubject
 # from services.user_management.models.teachers import TeacherSubject, ClassTeacher
 import services.user_management.models
+import services.attendance_management_system.models
 
 async def init_models():
     async with engine.begin() as conn:

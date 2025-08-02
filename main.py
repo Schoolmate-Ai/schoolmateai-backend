@@ -5,6 +5,7 @@ from services.user_management.controllers.super_admin_service import router as s
 from services.user_management.controllers.school_service import router as school_router
 from services.user_management.controllers.subject_service import router as subject_router
 from services.user_management.controllers.teacher_service import router as teacher_router
+from services.attendance_management_system.controllers.attendance_service import router as attendance_router
 
 
 app = FastAPI(title="SchoolMate AI Backend")
@@ -26,4 +27,5 @@ app.include_router(superadmin_router)
 app.include_router(school_router)
 app.include_router(subject_router)
 app.include_router(teacher_router)
+app.include_router(attendance_router)
 

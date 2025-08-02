@@ -37,7 +37,6 @@ class ClassSubject(Base):
 
     school_class = relationship("SchoolClass", back_populates="class_subjects")
     subject = relationship("SchoolSubject")
-    teachers = relationship("TeacherSubject", back_populates="class_subject", cascade="all, delete-orphan")
 
 
 # Optional subject mapping for student
