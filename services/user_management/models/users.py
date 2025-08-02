@@ -36,6 +36,13 @@ class SchoolUser(Base):
     # Relationship to class
     student_class = relationship("SchoolClass", back_populates="students")
     
+    # Relationship to option subjects for students
+    optional_subjects = relationship("StudentSubject", back_populates="student",cascade="all, delete-orphan")
+
+    # Relationship to classteacher and subject for teachers
+    class_teacher_of = relationship("ClassTeacher", back_populates="teacher", uselist=False)
+    subjects_taught = relationship("TeacherSubject", back_populates="teacher", cascade="all, delete-orphan")
+
 
     __table_args__ = (
     Index('idx_user_email', 'email'),  # login and unique checks

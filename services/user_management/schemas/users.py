@@ -61,3 +61,11 @@ class StudentOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+class SchoolTeacherOut(BaseModel):
+    id: UUID 
+    name: str
+    email: EmailStr
+
+    class Config:
+        orm_mode = True
