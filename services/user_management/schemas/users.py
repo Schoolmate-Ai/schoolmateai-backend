@@ -45,7 +45,7 @@ class SchoolUserLoginRequest(BaseModel):
 
 class SchoolUserLoginResponse(BaseModel):
     name: str
-    school_id: str
+    profile_data: Optional[Dict[str, Any]]
     access_token: str
 
 class ClassStudentRequest(BaseModel):

@@ -13,7 +13,7 @@ from services.user_management.schemas.users import (
 )
 from shared.auth import verify_password, create_access_token
 from shared.db import get_db
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from shared.auth import get_current_user
 from passlib.context import CryptContext
 from fastapi import Body
@@ -34,33 +34,47 @@ async def school_user_login(
     payload: SchoolUserLoginRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(SchoolUser).where(SchoolUser.email == payload.email)
-    )
-    user = result.scalars().first()
+    try:
+        result = await db.execute(
+            select(SchoolUser).where(SchoolUser.email == payload.email)
+        )
+        user = result.scalars().first()
 
-    if not user or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
+        if not user or not verify_password(payload.password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+
+        # Include user_id, role, email in token
+        token_data = {
+            "sub": user.email,
+            "role": user.role,
+            "user_id": str(user.id),
+            "school_id": user.school_id
+        }
+
+        access_token = create_access_token(token_data)
+
+        return SchoolUserLoginResponse(
+            name=user.name,
+            profile_data=user.profile_data,
+            access_token=access_token
         )
 
-    # Include user_id, role, email in token
-    token_data = {
-        "sub": user.email,
-        "role": user.role,
-        "user_id": str(user.id),
-        "school_id": user.school_id
-    }
+    except SQLAlchemyError as db_err:
+        # Logs can also be added here if needed
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error while processing login request."
+        )
 
-    access_token = create_access_token(token_data)
-
-    return SchoolUserLoginResponse(
-        name=user.name,
-        school_id=user.school_id,
-        access_token=access_token
-    )
-
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during login."
+        )
+    
 
 # --- SCHOOL ADMIN REGISTRATION ---
 @router.post("/register-admin", response_model=SchoolUserOut)
