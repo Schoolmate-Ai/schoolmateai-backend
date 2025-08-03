@@ -19,7 +19,7 @@ from passlib.context import CryptContext
 from fastapi import Body
 from services.user_management.models.classes import SchoolClass
 from services.user_management.schemas.classes import SchoolClassCreate, SchoolClassOut
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from services.user_management.models.subjects import SchoolSubject
 from services.user_management.schemas.subjects import SchoolSubjectCreate, SchoolSubjectOut
@@ -320,13 +320,13 @@ async def add_class(
     return new_class
 
 
-# --- GET CLASSES BY SCHOOL ID ---
-@router.get("/{school_id}/classes", response_model=list[SchoolClassOut])
+# --- GET CLASSES BY SCHOOL ID PRESENT IN TOKEN ---
+@router.get("/classes", response_model=list[SchoolClassOut])
 async def get_all_classes_with_sections(
-    school_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
+    school_id = current_user["school_id"]
     stmt = select(SchoolClass).where(SchoolClass.school_id == school_id)
     result = await db.execute(stmt)
     all_classes = result.scalars().all()
@@ -502,7 +502,6 @@ async def get_all_students_with_classes(
 
 
 # --- GET ALL TEACHERS FOR A SCHOOL (ID, NAME, EMAIL) ---
-# --- GET ALL TEACHERS FOR A SCHOOL (ID, NAME, EMAIL) ---
 @router.get("/teachers", response_model=List[SchoolTeacherOut])
 async def get_all_teachers(
     db: AsyncSession = Depends(get_db),
@@ -533,3 +532,61 @@ async def get_all_teachers(
     teachers = result.scalars().all()
     
     return teachers
+
+
+
+# --- GET ALL USERS WITH FILTERS ---
+@router.get("/users/", response_model=list[SchoolUserOut])
+async def get_school_users(
+    role: Optional[SchoolUserRole] = None,
+    class_id: Optional[UUID] = None,
+    is_active: Optional[bool] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get users with optional filters for role, class_id, and active status.
+    SCHOOL_SUPERADMIN can view all users in their school.
+    SCHOOL_ADMIN can view teachers and students in their school.
+    TEACHER can view students in their school.
+    """
+    # Check permissions based on current user's role
+    if current_user["role"] == SchoolUserRole.SCHOOL_SUPERADMIN:
+        # Superadmin can view all roles in their school
+        pass
+    elif current_user["role"] == SchoolUserRole.SCHOOL_ADMIN:
+        # Admin can only view teachers and students
+        if role in [SchoolUserRole.SCHOOL_SUPERADMIN, SchoolUserRole.SCHOOL_ADMIN]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admins can only view teachers and students"
+            )
+    elif current_user["role"] == SchoolUserRole.TEACHER:
+        # Teachers can only view students
+        if role != SchoolUserRole.STUDENT:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Teachers can only view students"
+            )
+    else:
+        # Others (students) can't view any users
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to view users"
+        )
+
+    # Base query - only users from current user's school
+    query = select(SchoolUser).where(SchoolUser.school_id == current_user["school_id"])
+
+    # Apply filters
+    if role:
+        query = query.where(SchoolUser.role == role)
+    if class_id:
+        query = query.where(SchoolUser.class_id == class_id)
+    if is_active is not None:
+        query = query.where(SchoolUser.is_active == is_active)
+
+    # Execute query
+    result = await db.execute(query)
+    users = result.scalars().all()
+    return users

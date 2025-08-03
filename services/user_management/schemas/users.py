@@ -24,6 +24,7 @@ class SchoolUserOut(BaseModel):
     name: str
     email: EmailStr
     role: SchoolUserRole
+    profile_data:Optional[Dict[str, Any]]
     class_id: Optional[UUID]
     is_active: bool
     created_at: datetime
@@ -49,7 +50,6 @@ class SchoolUserLoginResponse(BaseModel):
     access_token: str
 
 class ClassStudentRequest(BaseModel):
-    school_id: str
     class_id: UUID
     
 class StudentOut(BaseModel):
@@ -57,7 +57,6 @@ class StudentOut(BaseModel):
     name: str
     email: str
     class_id: UUID
-    school_id: str
 
     class Config:
         orm_mode = True
