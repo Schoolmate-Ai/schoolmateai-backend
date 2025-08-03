@@ -74,7 +74,6 @@ async def school_user_login(
         )
 
     except Exception as e:
-        print(e,"eeee")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during login."
@@ -164,28 +163,20 @@ async def register_teacher(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # Role validation
     if current_user["role"] not in [SchoolUserRole.SCHOOL_ADMIN, SchoolUserRole.SCHOOL_SUPERADMIN]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only school_admin or school_superadmin can create teacher accounts"
         )
 
-    # Ensure only teacher role can be created via this endpoint
     if payload.role != SchoolUserRole.TEACHER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This route can only be used to register teachers"
         )
 
-    # School ownership verification (from token)
-    if current_user["school_id"] != payload.school_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only create teachers for your own school"
-        )
+    school_id = current_user["school_id"]
 
-    # Check for existing email
     existing_user = await db.execute(
         select(SchoolUser).where(SchoolUser.email == payload.email)
     )
@@ -195,28 +186,26 @@ async def register_teacher(
             detail="User with this email already exists"
         )
 
-    # Create new teacher
-    hashed_pw = pwd_context.hash(payload.password)
     new_teacher = SchoolUser(
         name=payload.name,
         email=payload.email,
-        hashed_password=hashed_pw,
+        hashed_password=pwd_context.hash(payload.password),
         role=SchoolUserRole.TEACHER,
-        school_id=payload.school_id,
+        school_id=school_id,
         profile_data=payload.profile_data
     )
 
     db.add(new_teacher)
     try:
         await db.commit()
+        await db.refresh(new_teacher)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Integrity error while creating teacher"
         )
-    
-    await db.refresh(new_teacher)
+
     return new_teacher
 
 
@@ -227,28 +216,21 @@ async def register_student(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # Authorization check
     if current_user["role"] not in [SchoolUserRole.SCHOOL_ADMIN, SchoolUserRole.SCHOOL_SUPERADMIN]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only school administrators can create student accounts"
         )
 
-    # Role validation
     if payload.role != SchoolUserRole.STUDENT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This endpoint is only for student registration"
         )
 
-    # School ownership verification (from token)
-    if current_user["school_id"] != payload.school_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only create students for your own school"
-        )
+   
+    school_id = current_user["school_id"]
 
-    # Check for existing email
     existing_user = await db.execute(
         select(SchoolUser).where(SchoolUser.email == payload.email)
     )
@@ -258,13 +240,12 @@ async def register_student(
             detail="Email already registered"
         )
 
-    # Create student
     new_student = SchoolUser(
         name=payload.name,
         email=payload.email,
         hashed_password=pwd_context.hash(payload.password),
         role=SchoolUserRole.STUDENT,
-        school_id=payload.school_id,
+        school_id=school_id,
         class_id=payload.class_id,
         profile_data=payload.profile_data
     )
@@ -272,14 +253,14 @@ async def register_student(
     db.add(new_student)
     try:
         await db.commit()
+        await db.refresh(new_student)
     except IntegrityError as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Database error: {str(e)}"
         )
-    
-    await db.refresh(new_student)
+
     return new_student
 
 
@@ -521,20 +502,13 @@ async def get_all_students_with_classes(
 
 
 # --- GET ALL TEACHERS FOR A SCHOOL (ID, NAME, EMAIL) ---
-@router.get("/{school_id}/teachers", response_model=List[SchoolTeacherOut])
+# --- GET ALL TEACHERS FOR A SCHOOL (ID, NAME, EMAIL) ---
+@router.get("/teachers", response_model=List[SchoolTeacherOut])
 async def get_all_teachers(
-    school_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # Verify the user has access to this school's data
-    if current_user["school_id"] != school_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only access data from your own school"
-        )
-
-    # Only school admins, superadmins and teachers can access this endpoint
+    # Role-based access control
     if current_user["role"] not in [
         SchoolUserRole.SCHOOL_ADMIN, 
         SchoolUserRole.SCHOOL_SUPERADMIN,
@@ -545,12 +519,16 @@ async def get_all_teachers(
             detail="Insufficient privileges to view teachers"
         )
 
-    # Get all teachers of the school with only id, name, email
+    school_id = current_user["school_id"]
+
+    # Fetch all teachers from that school
     result = await db.execute(
-        select(SchoolUser).where(
+        select(SchoolUser)
+        .where(
             SchoolUser.school_id == school_id,
             SchoolUser.role == SchoolUserRole.TEACHER
-        ).order_by(SchoolUser.name)
+        )
+        .order_by(SchoolUser.name)
     )
     teachers = result.scalars().all()
     
