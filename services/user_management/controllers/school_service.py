@@ -74,6 +74,7 @@ async def school_user_login(
         )
 
     except Exception as e:
+        print(e,"eeee")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during login."
