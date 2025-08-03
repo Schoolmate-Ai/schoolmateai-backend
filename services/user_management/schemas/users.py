@@ -17,7 +17,6 @@ class SchoolUserCreate(BaseModel):
     password: str
     class_id: Optional[UUID] = None
     role: SchoolUserRole
-    school_id: str  # UUID as string
     profile_data: Optional[Dict[str, Any]] = None
 
 class SchoolUserOut(BaseModel):
@@ -25,7 +24,6 @@ class SchoolUserOut(BaseModel):
     name: str
     email: EmailStr
     role: SchoolUserRole
-    school_id: str
     class_id: Optional[UUID]
     is_active: bool
     created_at: datetime

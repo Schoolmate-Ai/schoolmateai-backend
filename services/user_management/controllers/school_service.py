@@ -83,7 +83,7 @@ async def school_user_login(
 # --- SCHOOL ADMIN REGISTRATION ---
 @router.post("/register-admin", response_model=SchoolUserOut)
 async def register_school_admin(
-    payload: SchoolUserCreate,
+    payload: SchoolUserCreate,  
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -94,50 +94,67 @@ async def register_school_admin(
             detail="Only school_superadmin can create school_admin users"
         )
 
-    # 🔒 Prevent creating other roles (enforced here)
+    # 🔒 Enforce only SCHOOL_ADMIN role allowed via this route
     if payload.role != SchoolUserRole.SCHOOL_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only 'school_admin' role can be created via this route"
         )
 
-    # 🧠 Ensure school_id matches token's user school (from token)
-    if current_user["school_id"] != payload.school_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only create admins for your own school"
-        )
-
-    # 🚫 Check if email exists
+    # 🚫 Check if email already exists
     result = await db.execute(select(SchoolUser).where(SchoolUser.email == payload.email))
-    existing_user = result.scalars().first()
-    if existing_user:
-        raise HTTPException(
-            status_code=400,
-            detail="User with this email already exists"
-        )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="User with this email already exists")
 
+    # 🔐 Hash password
     hashed_pw = pwd_context.hash(payload.password)
 
+    # 🆕 Create new user using token’s school_id
     new_user = SchoolUser(
         name=payload.name,
         email=payload.email,
         hashed_password=hashed_pw,
         role=payload.role,
-        school_id=payload.school_id,
+        school_id=current_user["school_id"],  # Taken from token
         profile_data=payload.profile_data
     )
 
     db.add(new_user)
     try:
         await db.commit()
+        await db.refresh(new_user)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=400, detail="Integrity error while creating user")
-    
-    await db.refresh(new_user)
+
     return new_user
 
+
+# --- GET ALL ADMIN  ---
+@router.get("/admins", response_model=list[SchoolUserOut])
+async def get_all_school_admins(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    # ✅ Only SCHOOL_SUPERADMIN can fetch admins
+    if current_user["role"] != SchoolUserRole.SCHOOL_SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only school_superadmin can view school admins"
+        )
+
+    # 📦 Use school_id from token
+    school_id = current_user["school_id"]
+
+    # 🔍 Fetch admins of that school
+    result = await db.execute(
+        select(SchoolUser).where(
+            SchoolUser.role == SchoolUserRole.SCHOOL_ADMIN,
+            SchoolUser.school_id == school_id
+        )
+    )
+    admins = result.scalars().all()
+    return admins
 
 # --- REGISTER TEACHER ---
 @router.post("/register-teacher", response_model=SchoolUserOut)
@@ -467,39 +484,6 @@ async def get_all_subjects(
         .order_by(SchoolSubject.name)  # Added ordering
     )
     return subjects.scalars().all()
-
-
-# --- GET ALL ADMINS FOR A SCHOOL ---
-@router.get("/{school_id}/admins", response_model=List[SchoolUserOut])
-async def get_school_admins(
-    school_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
-):
-    # Verify the user has access to this school's data
-    if current_user["school_id"] != school_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only access data from your own school"
-        )
-
-    # Only school_superadmin can access this endpoint
-    if current_user["role"] != SchoolUserRole.SCHOOL_SUPERADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only school_superadmin can view all admins of a school"
-        )
-
-    # Get all admins of the school
-    result = await db.execute(
-        select(SchoolUser).where(
-            SchoolUser.school_id == school_id,
-            SchoolUser.role == SchoolUserRole.SCHOOL_ADMIN
-        ).order_by(SchoolUser.name)
-    )
-    admins = result.scalars().all()
-    
-    return admins
 
 
 # --- GET ALL STUDENTS(By classes) FOR A SCHOOL ---
